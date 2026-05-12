@@ -35,3 +35,4 @@ jobs:
           docker stop tienda-frontend || true
           docker rm tienda-frontend || true
           docker run -d --name tienda-frontend -p 80:80 ${{ secrets.DOCKER_USERNAME }}/tienda-frontend:latest
+          

@@ -18,7 +18,7 @@ jobs:
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # <-- Ahora sí está mapeado el token del lab
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # <-- Mapeado el token del lab
         aws-region: ${{ secrets.AWS_REGION }}
 
     # 2. Login oficial en Amazon ECR
@@ -26,8 +26,9 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # 3. Build imagen Frontend y push a Amazon ECR
+    # 3. Build imagen Frontend, push a Amazon ECR y registrar salida de imagen
     - name: Build imagen Frontend y push a Amazon ECR
+      id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: tienda-frontend
@@ -35,23 +36,26 @@ jobs:
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-    # 4. Desplegar temporalmente en AWS vía SSH (usando la imagen de ECR)
-    - name: Desplegar Frontend en AWS vía SSH
-      uses: appleboy/ssh-action@master
+    # =============================================================
+    # DESPLIEGUE MODERNO NATIVO EN AMAZON ECS (FARGATE)
+    # =============================================================
+
+    # 4. Inyectar dinámicamente la nueva URI de la imagen en tu archivo local task-definition.json
+    - name: Registrar la nueva imagen en la Task Definition de ECS
+      id: render-web-container
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ec2-user
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          # Logearse en AWS ECR desde la instancia EC2 para que pueda descargar la imagen
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 533368342861.dkr.ecr.us-east-1.amazonaws.com
-          
-          # Detener y borrar el contenedor viejo
-          docker stop tienda-frontend || true
-          docker rm tienda-frontend || true
-          
-          
-          # Descargar la nueva imagen desde tu ECR y correrla
-          docker pull 533368342861.dkr.ecr.us-east-1.amazonaws.com/tienda-frontend:latest
-          docker run -d --name tienda-frontend -p 80:80 533368342861.dkr.ecr.us-east-1.amazonaws.com/tienda-frontend:latest
+        task-definition: task-definition.json
+        container-name: tienda-frontend
+        image: ${{ steps.build-image.outputs.image }}
+
+    # 5. Desplegar la nueva definición de tarea en el servicio de ECS y esperar estabilidad
+    - name: Desplegar Definición de Tarea en Amazon ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+      with:
+        task-definition: ${{ steps.render-web-container.outputs.task-definition }}
+        service: servicio-frontend
+        cluster: cluster-tienda-perritos
+        wait-for-service-stability: true

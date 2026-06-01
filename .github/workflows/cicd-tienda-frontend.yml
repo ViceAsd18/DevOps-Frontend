@@ -2,7 +2,7 @@ name: CI/CD Tienda Perritos - Frontend
 
 on:
   push:
-    branches: [ "master" ] # <-- Cambiado de deploy a master
+    branches: [ "master" ]
 
 jobs:
   build-push-deploy-frontend:
@@ -12,12 +12,13 @@ jobs:
     - name: Checkout código
       uses: actions/checkout@v4
 
-    # 1. Configurar credenciales de AWS usando los Secrets que guardamos
+    # 1. Configurar credenciales de AWS usando los Secrets que guardamos (CON SESSION TOKEN)
     - name: Configurar credenciales de AWS
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # <-- Ahora sí está mapeado el token del lab
         aws-region: ${{ secrets.AWS_REGION }}
 
     # 2. Login oficial en Amazon ECR
@@ -29,7 +30,7 @@ jobs:
     - name: Build imagen Frontend y push a Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: tienda-frontend # <-- Nombre exacto de tu repo en ECR
+        ECR_REPOSITORY: tienda-frontend
         IMAGE_TAG: latest
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
@@ -49,6 +50,7 @@ jobs:
           # Detener y borrar el contenedor viejo
           docker stop tienda-frontend || true
           docker rm tienda-frontend || true
+          
           
           # Descargar la nueva imagen desde tu ECR y correrla
           docker pull 533368342861.dkr.ecr.us-east-1.amazonaws.com/tienda-frontend:latest

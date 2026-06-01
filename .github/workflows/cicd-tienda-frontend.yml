@@ -2,7 +2,7 @@ name: CI/CD Tienda Perritos - Frontend
 
 on:
   push:
-    branches: [ "deploy" ]
+    branches: [ "master" ] # <-- Cambiado de deploy a master
 
 jobs:
   build-push-deploy-frontend:
@@ -10,19 +10,32 @@ jobs:
 
     steps:
     - name: Checkout código
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Login en Docker Hub
-      uses: docker/login-action@v2
+    # 1. Configurar credenciales de AWS usando los Secrets que guardamos
+    - name: Configurar credenciales de AWS
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Build imagen Frontend y push a Docker Hub
+    # 2. Login oficial en Amazon ECR
+    - name: Login en Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # 3. Build imagen Frontend y push a Amazon ECR
+    - name: Build imagen Frontend y push a Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: tienda-frontend # <-- Nombre exacto de tu repo en ECR
+        IMAGE_TAG: latest
       run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/tienda-frontend:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/tienda-frontend:latest
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+    # 4. Desplegar temporalmente en AWS vía SSH (usando la imagen de ECR)
     - name: Desplegar Frontend en AWS vía SSH
       uses: appleboy/ssh-action@master
       with:
@@ -30,9 +43,13 @@ jobs:
         username: ec2-user
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-          docker pull ${{ secrets.DOCKER_USERNAME }}/tienda-frontend:latest
+          # Logearse en AWS ECR desde la instancia EC2 para que pueda descargar la imagen
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 533368342861.dkr.ecr.us-east-1.amazonaws.com
+          
+          # Detener y borrar el contenedor viejo
           docker stop tienda-frontend || true
           docker rm tienda-frontend || true
-          docker run -d --name tienda-frontend -p 80:80 ${{ secrets.DOCKER_USERNAME }}/tienda-frontend:latest
           
+          # Descargar la nueva imagen desde tu ECR y correrla
+          docker pull 533368342861.dkr.ecr.us-east-1.amazonaws.com/tienda-frontend:latest
+          docker run -d --name tienda-frontend -p 80:80 533368342861.dkr.ecr.us-east-1.amazonaws.com/tienda-frontend:latest

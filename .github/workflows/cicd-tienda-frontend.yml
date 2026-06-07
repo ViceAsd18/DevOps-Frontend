@@ -56,6 +56,6 @@ jobs:
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
         task-definition: ${{ steps.render-web-container.outputs.task-definition }}
-        service: servicio-frontend
-        cluster: cluster-tienda-perritos
+        service: servicio-frontend-tienda
+        cluster: cluster-tienda-perrito
         wait-for-service-stability: true
